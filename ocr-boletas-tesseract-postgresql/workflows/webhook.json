@@ -1,0 +1,174 @@
+{
+  "name": "Pipeline OCR de Boletas con Tesseract y PostgreSQL",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "ocr-boleta",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "responseData": {
+          "statusCode": 200,
+          "responseData": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "ocr-boleta-webhook"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Simulate OCR processing\n// Assuming input contains file info\n// For demo, we set static OCR result as in original JSON\nreturn [{\n  ...$json,\n  ocr: {\n    engine: \"tesseract\",\n    language: \"spa\",\n    confidence_avg: 0.87,\n    raw_text: \"BOLETA ELECTRONICA\\nFolio: 123456\\nFecha: 04-05-2026\\nRUT Emisor: 76.123.456-7\\nProveedor Demo SPA\\nSubtotal: 8.403\\nIVA: 1.597\\nTOTAL: 10.000\\nMedio de pago: Debito\"\n  }\n}];"
+      },
+      "name": "OCR Processing",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract structured data from OCR raw text\n// In real scenario, you would parse the raw_text\n// For demo, we set static extracted data as in original JSON\nreturn [{\n  ...$json,\n  extracted_data: {\n    document_type: \"boleta\",\n    folio: \"123456\",\n    issue_date: \"2026-05-04\",\n    issuer_name: \"Proveedor Demo SPA\",\n    issuer_rut: \"76.123.456-7\",\n    currency: \"CLP\",\n    subtotal: 8403,\n    tax: 1597,\n    total: 10000,\n    payment_method: \"debito\"\n  }\n}];"
+      },
+      "name": "Data Extraction",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Validation rules\nconst errors = [];\nconst data = $json.extracted_data;\nif (parseFloat(data.subtotal) + parseFloat(data.tax) !== parseFloat(data.total)) {\n  errors.push('total_equals_subtotal_plus_tax');\n}\n// Simple RUT format check (contains hyphen and dots)\nif (!/^[0-9]{1,2}(\\.?[0-9]{3}){2}-[0-9kK]$/.test(data.issuer_rut)) {\n  errors.push('issuer_rut_format_valid');\n}\nif (!data.issue_date) {\n  errors.push('issue_date_present');\n}\nreturn [{\n  ...$json,\n  validation: {\n    status: errors.length === 0 ? 'valid' : 'invalid',\n    rules_applied: [\n      { rule: 'total_equals_subtotal_plus_tax', result: errors.indexOf('total_equals_subtotal_plus_tax') === -1 },\n      { rule: 'issuer_rut_format_valid', result: errors.indexOf('issuer_rut_format_valid') === -1 },\n      { rule: 'issue_date_present', result: errors.indexOf('issue_date_present') === -1 }\n    ],\n    observations: errors\n  }\n}];"
+      },
+      "name": "Validation",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "ocr",
+        "columns": {
+          "column": [
+            {
+              "name": "folio",
+              "value": "={{ $json.extracted_data.folio }}"
+            },
+            {
+              "name": "fecha",
+              "value": "={{ $json.extracted_data.issue_date }}"
+            },
+            {
+              "name": "rut_emisor",
+              "value": "={{ $json.extracted_data.issuer_rut }}"
+            },
+            {
+              "name": "proveedor",
+              "value": "={{ $json.extracted_data.issuer_name }}"
+            },
+            {
+              "name": "subtotal",
+              "value": "={{ $json.extracted_data.subtotal }}"
+            },
+            {
+              "name": "iva",
+              "value": "={{ $json.extracted_data.tax }}"
+            },
+            {
+              "name": "total",
+              "value": "={{ $json.extracted_data.total }}"
+            },
+            {
+              "name": "medio_pago",
+              "value": "={{ $json.extracted_data.payment_method }}"
+            },
+            {
+              "name": "raw_text",
+              "value": "={{ $json.ocr.raw_text }}"
+            },
+            {
+              "name": "extracted_data",
+              "value": "={{ $json.extracted_data }}"
+            },
+            {
+              "name": "validation",
+              "value": "={{ $json.validation }}"
+            }
+          ]
+        }
+      },
+      "name": "PostgreSQL",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        300
+      ],
+      "credentials": {
+        "postgresDb": "PostgreSQL Credentials"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "OCR Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OCR Processing": {
+      "main": [
+        [
+          {
+            "node": "Data Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data Extraction": {
+      "main": [
+        [
+          {
+            "node": "Validation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validation": {
+      "main": [
+        [
+          {
+            "node": "PostgreSQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "1",
+  "tags": []
+}
